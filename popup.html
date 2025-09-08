@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Immutable Stats Checker</title>
+    <style>
+        :root {
+            --bg: #ffffff;
+            --fg: #111827;
+            --muted: #6b7280;
+            --accent: #2563eb;
+            --card: #f3f4f6;
+            --border: rgba(0, 0, 0, 0.08);
+        }
+
+        .dark {
+            --bg: #0b1220;
+            --fg: #e5e7eb;
+            --muted: #9ca3af;
+            --accent: #60a5fa;
+            --card: #111827;
+            --border: rgba(255, 255, 255, 0.12);
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            width: 520px;
+            background: var(--bg);
+            color: var(--fg);
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol;
+        }
+
+        .wrap {
+            padding: 12px;
+            display: grid;
+            gap: 10px;
+        }
+
+        h1 {
+            font-size: 16px;
+            margin: 0 0 6px;
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .row>* {
+            flex: 1;
+        }
+
+        .label {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 70px;
+            padding: 8px;
+            background: var(--card);
+            color: var(--fg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            resize: vertical;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            background: var(--card);
+            color: var(--fg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+
+        /* Buttons */
+        button {
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--accent);
+            color: white;
+            cursor: pointer;
+            transition: transform .06s ease, filter .15s ease;
+            position: relative;
+        }
+
+        button.secondary {
+            background: transparent;
+            color: var(--fg);
+        }
+
+        button:hover {
+            filter: brightness(1.05);
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        button:disabled {
+            opacity: .6;
+            cursor: not-allowed;
+        }
+
+        .btn-label {
+            pointer-events: none;
+        }
+
+        .btn-spinner {
+            display: none;
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--border);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin .8s linear infinite;
+            margin-left: 6px;
+        }
+
+        .secondary .btn-spinner {
+            border-top-color: var(--accent);
+        }
+
+        .loading .btn-spinner {
+            display: inline-block;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .card {
+            background: var(--card);
+            padding: 8px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        .muted {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .kv {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        /* Emphasis: progress + tier */
+        .tier-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 13px;
+        }
+
+        .tier-common {
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .dark .tier-common {
+            background: #111827;
+            color: #d1d5db;
+        }
+
+        .tier-uncommon {
+            background: #e8fff3;
+            color: #065f46;
+            border-color: #10b981;
+        }
+
+        .dark .tier-uncommon {
+            background: #0b2d21;
+            color: #6ee7b7;
+            border-color: #10b981;
+        }
+
+        .tier-rare {
+            background: #e6f0ff;
+            color: #1e40af;
+            border-color: #3b82f6;
+        }
+
+        .dark .tier-rare {
+            background: #0b1630;
+            color: #93c5fd;
+            border-color: #3b82f6;
+        }
+
+        .tier-epic {
+            background: #f3e8ff;
+            color: #5b21b6;
+            border-color: #a855f7;
+        }
+
+        .dark .tier-epic {
+            background: #1a0b2d;
+            color: #d8b4fe;
+            border-color: #a855f7;
+        }
+
+        .tier-legendary {
+            background: #fff7e6;
+            color: #92400e;
+            border-color: #f59e0b;
+        }
+
+        .dark .tier-legendary {
+            background: #3b2f1a;
+            color: #fbbf24;
+            border-color: #d97706;
+        }
+
+        .progress-wrap {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 6px;
+        }
+
+        .progress-val {
+            font-size: 18px;
+            font-weight: 800;
+            min-width: 56px;
+            text-align: right;
+        }
+
+        .bar {
+            flex: 1 1 auto;
+            height: 12px;
+            background: #e5e7eb;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .dark .bar {
+            background: #1f2937;
+        }
+
+        .bar>i {
+            display: block;
+            height: 100%;
+            width: 0%;
+            background: var(--accent);
+            transition: width .3s ease;
+        }
+
+        .bar>i.tier-common {
+            background: #9ca3af;
+        }
+
+        .bar>i.tier-uncommon {
+            background: #2fbf71;
+        }
+
+        .bar>i.tier-rare {
+            background: #2d7ff9;
+        }
+
+        .bar>i.tier-epic {
+            background: #9b59b6;
+        }
+
+        .bar>i.tier-legendary {
+            background: goldenrod;
+        }
+
+        /* Tier text colors for emphasis */
+        .clr-common {
+            color: #6b7280;
+        }
+
+        .dark .clr-common {
+            color: #9ca3af;
+        }
+
+        .clr-uncommon {
+            color: #059669;
+        }
+
+        .clr-rare {
+            color: #2563eb;
+        }
+
+        .clr-epic {
+            color: #8b5cf6;
+        }
+
+        .clr-legendary {
+            color: #d97706;
+        }
+
+        .center-stat {
+            display: flex;
+            justify-content: center;
+            align-items: baseline;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .center-points {
+            font-weight: 800;
+            font-size: 16px;
+        }
+
+        .warn {
+            color: #f59e0b;
+            font-size: 12px;
+        }
+
+        .error {
+            color: #ef4444;
+            font-size: 12px;
+        }
+
+        .ok {
+            color: #10b981;
+            font-size: 12px;
+        }
+
+        ul {
+            margin: 6px 0 0 0;
+            padding: 0;
+            font-size: 12px;
+            list-style: none;
+        }
+
+        .small {
+            font-size: 12px;
+        }
+
+        .game-header {
+            padding: 8px 10px;
+            margin-top: 6px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: #ebeff8;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .dark .game-header {
+            background: #0f1a34;
+        }
+
+        .game-list {
+            display: none;
+            padding: 6px 2px 2px 2px;
+        }
+
+        /* Toggle switch */
+        .toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            user-select: none;
+        }
+
+        .toggle input {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 40px;
+            height: 22px;
+            background: #e5e7eb;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            position: relative;
+            outline: none;
+            transition: background .2s ease;
+            cursor: pointer;
+        }
+
+        .dark .toggle input {
+            background: #1f2937;
+        }
+
+        .toggle input:checked {
+            background: var(--accent);
+        }
+
+        .toggle input::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 3px;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #fff;
+            transition: left .2s ease;
+        }
+
+        .toggle input:checked::after {
+            left: 21px;
+        }
+
+        /* Loader spinner */
+        .loader {
+            width: 14px;
+            height: 14px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            display: none;
+            margin-left: auto;
+        }
+
+        .loader.active {
+            display: block;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            font-size: 12px;
+        }
+
+        .quest-icon {
+            width: 18px;
+            height: 18px;
+            object-fit: cover;
+            vertical-align: middle;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+        }
+
+        .quest-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 2px;
+        }
+
+        .quest-points {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: #fff7e6;
+            color: #92400e;
+            border: 1px solid #f59e0b;
+            font-weight: 600;
+        }
+
+        .dark .quest-points {
+            background: #3b2f1a;
+            color: #fbbf24;
+            border-color: #d97706;
+        }
+
+        .quest-name {
+            flex: 1;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(17, 24, 39, .92);
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            display: none;
+            z-index: 9999;
+        }
+
+        .dark .toast {
+            background: rgba(31, 41, 55, .92);
+        }
+
+        .toast.show {
+            display: block;
+        }
+
+        /* Error callout */
+        .callout-error {
+            display: none;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #991b1b;
+            background: #fee2e2;
+            color: #7f1d1d;
+            font-size: 12px;
+        }
+
+        .dark .callout-error {
+            background: #2a1414;
+            border-color: #7a2c2c;
+            color: #fecaca;
+        }
+
+        /* Brand */
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .brand-icon {
+            width: 22px;
+            height: 22px;
+            border-radius: 6px;
+        }
+
+        .brand-title {
+            font-weight: 800;
+            font-size: 16px;
+            letter-spacing: .2px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root" class="wrap">
+        <div class="brand">
+            <img src="favicon-onLight-48x48.png" alt="Immutable Stats Checker" class="brand-icon" />
+            <div class="brand-title">Immutable Stats Checker</div>
+        </div>
+
+        <div class="card">
+            <div class="row" style="margin-bottom:6px;">
+                <a href="auth.html" style="text-decoration:none;"><button class="secondary"><span class="btn-label">Sign
+                            In</span><span class="btn-spinner"></span></button></a>
+            </div>
+            <div class="row" style="margin-bottom:6px;">
+                <div class="toggle"><span class="label">Auto-refresh</span><input id="autoRefreshToggle"
+                        type="checkbox"></div>
+                <div class="toggle"><span class="label">Dark mode</span><input id="darkModeToggle" type="checkbox">
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="pill"><span class="label">IP</span><strong id="ipBadge">—</strong></div>
+            <button id="copyIpBtn" class="secondary" style="flex:0 0 auto;"><span class="btn-label">Copy IP</span><span
+                    class="btn-spinner"></span></button>
+        </div>
+
+        <label class="label">Bearer token</label>
+        <textarea id="tokenText" readonly placeholder="No token captured yet."></textarea>
+
+        <div class="row">
+            <button id="copyBtn" class="secondary"><span class="btn-label">Copy</span><span
+                    class="btn-spinner"></span></button>
+            <button id="refreshBtn" class="secondary"><span class="btn-label">Refresh</span><span
+                    class="btn-spinner"></span></button>
+        </div>
+
+        <div id="errorBox" class="callout-error"></div>
+
+        <div class="card">
+            <div class="kv">
+                <div><strong>Tier</strong></div>
+                <div><span id="tierVal" class="tier-badge tier-common">—</span></div>
+            </div>
+            <div class="progress-wrap">
+                <div class="progress-val" id="progressVal">0%</div>
+                <div class="bar"><i id="progressBar"></i></div>
+            </div>
+            <div class="center-stat"><span class="label">Weekly Points</span><span id="weeklyPoints"
+                    class="center-points">0</span></div>
+            <div class="kv">
+                <div class="label">Token expiry</div>
+                <div id="expInfo" class="label"></div>
+            </div>
+            <div class="row">
+                <button id="retryStatsBtn" class="secondary"><span class="btn-label">Retry</span><span
+                        class="btn-spinner"></span></button>
+                <div id="statsLoader" class="loader"> </div>
+            </div>
+            <div id="noChangeMsg" class="label"></div>
+        </div>
+
+        <div class="card">
+            <div class="label"><strong>Eligibility</strong></div>
+            <ul id="eligibilityList"></ul>
+        </div>
+
+        <div class="card">
+            <div class="label"><strong>Completed Quests</strong></div>
+            <ul id="questsList"></ul>
+        </div>
+
+        <div class="card">
+            <div class="row" style="margin-bottom:6px;">
+                <div class="label"><strong>Available Quests</strong></div>
+                <div style="display:flex; gap:6px; justify-content:flex-end;">
+                    <button id="expandAllBtn" class="secondary"><span class="btn-label">Expand All</span><span
+                            class="btn-spinner"></span></button>
+                    <button id="collapseAllBtn" class="secondary"><span class="btn-label">Collapse All</span><span
+                            class="btn-spinner"></span></button>
+                </div>
+            </div>
+            <div id="availableGroups"></div>
+        </div>
+
+        <div class="card">
+            <div class="label"><strong>Environment</strong></div>
+            <div class="small" id="envInfo">—</div>
+        </div>
+
+        <div id="status" class="label"></div>
+    </div>
+    <div id="toast" class="toast"></div>
+    <script src="popup.js"></script>
+</body>
+
+</html>

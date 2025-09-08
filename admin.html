@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin • Immutable Stats Checker</title>
+    <style>
+        :root {
+            --bg: #0f1320;
+            --card: #151a2b;
+            --muted: #aab3c5;
+            --text: #e8ecf3;
+            --accent: #7aa2ff;
+            --good: #2fbf71;
+            --border: #27314f;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(180deg, #131a2b, #0f1320);
+            color: var(--text);
+            font-family: Inter, system-ui, sans-serif;
+        }
+
+        .wrap {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 22px 14px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px;
+            margin: 12px 0;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        h1 {
+            margin: 0 0 10px;
+            font-size: 20px;
+        }
+
+        .nav {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .nav a {
+            text-decoration: none;
+        }
+
+        button,
+        select,
+        input {
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #0b1024;
+            color: var(--text);
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 12px;
+        }
+
+        #adminLoginForm {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #adminLoginForm label {
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+
+        button.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            border-bottom: 1px solid var(--border);
+            padding: 8px 6px;
+            text-align: left;
+            font-size: .95rem;
+        }
+
+        .pill {
+            display: inline-flex;
+            padding: 2px 8px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: #0b1024;
+            font-size: .8rem;
+        }
+
+        .ok {
+            color: #10b981;
+        }
+
+        /* Tier styling to match extension */
+        .tier-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            font-weight: 700;
+            text-transform: uppercase;
+            font-size: 13px;
+        }
+
+        .tier-common {
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .tier-uncommon {
+            background: #e8fff3;
+            color: #065f46;
+            border-color: #10b981;
+        }
+
+        .tier-rare {
+            background: #e6f0ff;
+            color: #1e40af;
+            border-color: #3b82f6;
+        }
+
+        .tier-epic {
+            background: #f3e8ff;
+            color: #5b21b6;
+            border-color: #a855f7;
+        }
+
+        .tier-legendary {
+            background: #fff7e6;
+            color: #92400e;
+            border-color: #f59e0b;
+        }
+
+        /* Progress bar styling to match extension */
+        .progress-bar {
+            width: 100%;
+            height: 12px;
+            background: #e5e7eb;
+            border-radius: 6px;
+            overflow: hidden;
+            margin: 4px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            transition: width .3s ease;
+        }
+
+        .progress-fill.tier-common {
+            background: #9ca3af;
+        }
+
+        .progress-fill.tier-uncommon {
+            background: #2fbf71;
+        }
+
+        .progress-fill.tier-rare {
+            background: #2d7ff9;
+        }
+
+        .progress-fill.tier-epic {
+            background: #9b59b6;
+        }
+
+        .progress-fill.tier-legendary {
+            background: goldenrod;
+        }
+
+        /* Tier text colors */
+        .tier-text-common {
+            color: #6b7280;
+        }
+
+        .tier-text-uncommon {
+            color: #059669;
+        }
+
+        .tier-text-rare {
+            color: #2563eb;
+        }
+
+        .tier-text-epic {
+            color: #8b5cf6;
+        }
+
+        .tier-text-legendary {
+            color: #d97706;
+        }
+
+        /* Eligibility styling */
+        .eligibility-eligible {
+            color: #10b981;
+        }
+
+        .eligibility-not-eligible {
+            color: #ef4444;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+
+        .muted {
+            color: var(--muted);
+            font-size: .9rem;
+        }
+
+        .search {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        /* Modal Styles */
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, .7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+
+        .modal {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 450px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, .4);
+            position: relative;
+        }
+
+        .modal h3 {
+            margin: 0 0 16px;
+            font-size: 20px;
+            color: var(--text);
+            text-align: center;
+        }
+
+        .modal label {
+            display: block;
+            margin: 12px 0 6px;
+            color: var(--muted);
+            font-size: .9rem;
+            font-weight: 500;
+        }
+
+        .modal input,
+        .modal select {
+            width: 100%;
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #0b1024;
+            color: var(--text);
+            font-size: .95rem;
+        }
+
+        .modal input:focus,
+        .modal select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(122, 162, 255, 0.2);
+        }
+
+        .modal .button-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 16px;
+            justify-content: flex-end;
+        }
+
+        .modal button {
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #0b1024;
+            color: var(--text);
+            cursor: pointer;
+            font-size: .9rem;
+            transition: all 0.2s ease;
+        }
+
+        .modal button.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+
+        .modal button:hover {
+            opacity: 0.8;
+        }
+
+        .modal button.primary:hover {
+            background: #6b8fff;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <div class="card">
+            <h1>Admin Dashboard</h1>
+            <div id="adminContent">
+                <div class="admin-actions" style="display: flex; gap: 8px; margin-bottom: 10px;">
+                    <button id="adminLoginBtn" class="primary">Sign In as Admin</button>
+                    <button id="generateCodeBtn" class="primary" style="display: none;">Generate Access Code</button>
+                    <button id="viewCodesBtn" style="display: none;">View All Codes</button>
+                    <button id="adminLogoutBtn" style="display: none;">Sign Out</button>
+                </div>
+                <div id="adminInfo" class="muted">Please sign in to access admin features</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Last Activity</th>
+                        <th>Latest Tier</th>
+                        <th>Progress</th>
+                        <th>Points</th>
+                        <th>Entries</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Access Code Modal -->
+    <div id="codeModal" class="modal-backdrop" style="display: none;">
+        <div class="modal">
+            <h3 id="modalTitle">Generate Access Code</h3>
+            <div id="modalContent">
+                <div id="generateForm">
+                    <label for="codeLength">Code Length:</label>
+                    <select id="codeLength">
+                        <option value="6">6 characters</option>
+                        <option value="8" selected>8 characters</option>
+                        <option value="10">10 characters</option>
+                        <option value="12">12 characters</option>
+                    </select>
+                    <label for="codePrefix">Prefix (optional):</label>
+                    <input type="text" id="codePrefix" placeholder="e.g., VIP, BETA">
+                    <div class="button-group">
+                        <button id="cancelBtn">Cancel</button>
+                        <button id="generateBtn" class="primary">Generate</button>
+                    </div>
+                </div>
+                <div id="generatedCode" style="display: none;">
+                    <div class="muted">Generated Access Code:</div>
+                    <div id="newCode"
+                        style="font-family: monospace; font-size: 18px; margin: 12px 0; padding: 12px; background: #0b1024; border-radius: 8px; border: 1px solid var(--border); text-align: center; letter-spacing: 2px;">
+                    </div>
+                    <div class="button-group">
+                        <button id="closeModalBtn">Close</button>
+                        <button id="copyCodeBtn" class="primary">Copy Code</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Login Modal -->
+    <div id="adminLoginModal" class="modal-backdrop" style="display: none;">
+        <div class="modal">
+            <h3>Admin Sign In</h3>
+            <div id="adminLoginForm">
+                <label for="adminEmail">Admin Email:</label>
+                <input type="email" id="adminEmail" placeholder="admin@example.com">
+                <label for="adminPassword">Admin Password:</label>
+                <input type="password" id="adminPassword" placeholder="••••••••">
+                <div class="button-group">
+                    <button id="closeAdminLoginBtn">Cancel</button>
+                    <button id="adminLoginSubmitBtn" class="primary">Sign In</button>
+                </div>
+                <div id="adminLoginMsg" class="muted" style="margin-top: 8px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- View Codes Modal -->
+    <div id="viewCodesModal" class="modal-backdrop" style="display: none;">
+        <div class="modal" style="max-width: 600px;">
+            <h3>Access Codes</h3>
+            <div id="codesList" style="max-height: 400px; overflow-y: auto;">
+                <div class="muted">Loading codes...</div>
+            </div>
+            <div class="button-group">
+                <button id="closeViewModalBtn">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Stats Modal -->
+    <div id="userStatsModal" class="modal-backdrop" style="display: none;">
+        <div class="modal" style="max-width: 800px; max-height: 90vh;">
+            <div class="modal-header">
+                <h3 id="userStatsModalTitle">User Statistics</h3>
+                <button id="closeUserStatsModal" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                <div id="userStatsContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="admin.js"></script>
+</body>
+
+</html>

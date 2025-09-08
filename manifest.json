@@ -1,0 +1,65 @@
+{
+    "manifest_version": 3,
+    "name": "Immutable Stats Checker",
+    "version": "1.0.0",
+    "description": "Captures your bearer token and displays Immutable Play stats (tier, progress, quests).",
+    "permissions": [
+        "webRequest",
+        "storage",
+        "scripting",
+        "tabs"
+    ],
+    "host_permissions": [
+        "https://api.immutable.com/*",
+        "https://play.immutable.com/*",
+        "https://identitytoolkit.googleapis.com/*",
+        "https://firestore.googleapis.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "file://*/*",
+        "<all_urls>"
+    ],
+    "icons": {
+        "16": "favicon-onLight-48x48.png",
+        "32": "favicon-onLight-48x48.png",
+        "48": "favicon-onLight-48x48.png",
+        "128": "favicon-onLight-48x48.png"
+    },
+    "background": {
+        "service_worker": "background.js"
+    },
+    "action": {
+        "default_title": "Immutable Stats Checker",
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "favicon-onLight-48x48.png",
+            "32": "favicon-onLight-48x48.png",
+            "48": "favicon-onLight-48x48.png"
+        }
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://play.immutable.com/*"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_start"
+        },
+        {
+            "matches": [
+                "http://localhost/*",
+                "http://127.0.0.1/*",
+                "file://*/*"
+            ],
+            "js": [
+                "site_bridge.js"
+            ],
+            "run_at": "document_idle"
+        }
+    ],
+    "content_security_policy": {
+        "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://identitytoolkit.googleapis.com https://firestore.googleapis.com https://api.immutable.com https://play.immutable.com;"
+    }
+}
