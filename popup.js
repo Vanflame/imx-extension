@@ -353,7 +353,20 @@ async function fetchImmutableStats(token) {
 }
 
 async function getPublicIP() {
-    try { const r = await fetch('https://api.ipify.org?format=json'); if (!r.ok) return 'Unknown IP'; const j = await r.json(); return j && j.ip ? j.ip : 'Unknown IP'; } catch { return 'Unknown IP'; }
+    try {
+        const r = await fetch('https://api.ipify.org?format=json');
+        if (!r.ok) return null;
+        const j = await r.json();
+        const ip = j && j.ip ? j.ip.trim() : null;
+
+        // Validate IPv4 format
+        if (ip && /^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+            return ip;
+        }
+        return null;
+    } catch {
+        return null;
+    }
 }
 
 async function notifyBackgroundFirebase(token, combined, logId) {
@@ -472,14 +485,10 @@ function init() {
 
     // Gate: require Firebase user present in storage
     getFromStorage(['firebaseUser', 'accessGranted']).then((data) => {
-        console.log('Popup auth check - storage data:', data);
         const user = data && data['firebaseUser'];
         const accessGranted = !!(data && data['accessGranted']);
-        console.log('Popup auth check - user:', user);
-        console.log('Popup auth check - accessGranted:', accessGranted);
 
         if (!user || !accessGranted) {
-            console.log('Popup auth check - NOT AUTHENTICATED, showing locked screen');
             renderLocked();
             const link = document.getElementById('goSignIn') || document.querySelector('a[href="auth.html"]');
             if (link) link.addEventListener('click', openAuthTab);
@@ -572,7 +581,6 @@ function init() {
 
             // Check if user authentication status changed
             if (changes && (changes['firebaseUser'] || changes['accessGranted'])) {
-                console.log('Authentication status changed, refreshing popup...');
                 setTimeout(() => {
                     location.reload();
                 }, 500);

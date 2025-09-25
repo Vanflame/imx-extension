@@ -1,55 +1,165 @@
-// Firebase REST API (CSP-friendly for Chrome Extensions)
+// Admin dashboard for Chrome Extension
+
+// Firebase configuration for fallback
 const firebaseConfig = {
     apiKey: "AIzaSyA0fUKA2kpoW9hHEWKcRqxjX-m-ZBFRpVM",
     projectId: "immutable-api"
 };
 
 const IDT_BASE = "https://identitytoolkit.googleapis.com/v1";
-const FS_BASE = (path) => `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(firebaseConfig.projectId)}/databases/(default)/documents${path}`;
+const FS_BASE = (path) => `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(firebaseConfig.projectId)}/databases/(default)/documents/${path}`;
 
-// Helper functions for Firestore data conversion (no longer needed with v9+ SDK)
-// These functions are kept for backward compatibility with existing data structures
+// Firestore data conversion helpers
+function fsValue(val) {
+    if (val === null || typeof val === 'undefined') return { nullValue: null };
+    if (typeof val === 'string') return { stringValue: val };
+    if (typeof val === 'number') return Number.isInteger(val) ? { integerValue: String(val) } : { doubleValue: val };
+    if (typeof val === 'boolean') return { booleanValue: val };
+    if (Array.isArray(val)) return { arrayValue: { values: val.map(fsValue) } };
+    if (val instanceof Date) return { timestampValue: val.toISOString() };
+    if (typeof val === 'object') { const fields = {}; Object.keys(val).forEach(k => fields[k] = fsValue(val[k])); return { mapValue: { fields } }; }
+    return { stringValue: String(val) };
+}
 
+function fromFs(doc) {
+    const f = (doc && doc.fields) || {};
+    const pick = (v) => {
+        if (!v) return undefined;
+        if (v.stringValue !== undefined) return v.stringValue;
+        if (v.integerValue !== undefined) return parseInt(v.integerValue, 10);
+        if (v.doubleValue !== undefined) return v.doubleValue;
+        if (v.booleanValue !== undefined) return v.booleanValue;
+        if (v.timestampValue !== undefined) return v.timestampValue;
+        if (v.mapValue !== undefined) { const o = {}; const mf = v.mapValue.fields || {}; Object.keys(mf).forEach(k => o[k] = pick(mf[k])); return o; }
+        if (v.arrayValue !== undefined) return (v.arrayValue.values || []).map(pick);
+        return undefined;
+    };
+    const out = {}; Object.keys(f).forEach(k => out[k] = pick(f[k])); return out;
+}
+
+// Check if running in Chrome extension context
+function isExtensionContext() {
+    return typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id;
+}
+
+// Firestore operations with fallback for both extension and web contexts
 async function firestoreGetDoc(path, idToken = null) {
     try {
-        const docRef = doc(db, path);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-            return docSnap.data();
+        if (isExtensionContext()) {
+            // Use Chrome extension background script
+            const response = await chrome.runtime.sendMessage({
+                type: 'FIRESTORE_GET_DOC',
+                path: path,
+                idToken: idToken
+            });
+            if (response.success) {
+                return response.data;
+            } else {
+                throw new Error(response.error);
+            }
         } else {
-            return null;
+            // Fallback: Direct API call (may have CORS issues in some browsers)
+            const url = `${FS_BASE(path)}?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
+            const headers = idToken ? { 'Authorization': `Bearer ${idToken}` } : {};
+            const res = await fetch(url, { headers });
+            if (!res.ok) {
+                if (res.status === 404) return null;
+                throw new Error(`Firestore GET failed: ${res.status}`);
+            }
+            const doc = await res.json();
+            return fromFs(doc);
         }
     } catch (error) {
-        console.error('Error getting document:', error);
         return null;
     }
 }
 
 async function firestoreGetCollection(path, idToken = null) {
     try {
-        const collectionRef = collection(db, path);
-        const snapshot = await getDocs(collectionRef);
-        const docs = [];
-        snapshot.forEach((doc) => {
-            docs.push({
-                id: doc.id,
-                data: doc.data()
+        console.log(`Attempting to load collection: ${path}`, idToken ? 'with auth' : 'without auth');
+
+        if (isExtensionContext()) {
+            // Use Chrome extension background script
+            const response = await chrome.runtime.sendMessage({
+                type: 'FIRESTORE_GET_COLLECTION',
+                path: path,
+                idToken: idToken
             });
-        });
-        return docs;
+            console.log('Extension response:', response);
+            if (response.success) {
+                return response.data;
+            } else {
+                throw new Error(response.error);
+            }
+        } else {
+            // Fallback: Direct API call (may have CORS issues in some browsers)
+            const url = `${FS_BASE(path)}?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
+            const headers = idToken ? { 'Authorization': `Bearer ${idToken}` } : {};
+            console.log('Direct API call to:', url);
+            const res = await fetch(url, { headers });
+            console.log('Response status:', res.status);
+            if (!res.ok) {
+                const errorText = await res.text();
+                console.error('Firestore error response:', errorText);
+                throw new Error(`Firestore collection GET failed: ${res.status} - ${errorText}`);
+            }
+            const data = await res.json();
+            console.log('Firestore response data:', data);
+            const docs = [];
+            if (data.documents) {
+                data.documents.forEach(doc => {
+                    const pathParts = doc.name.split('/');
+                    const docId = pathParts[pathParts.length - 1];
+                    docs.push({
+                        id: docId,
+                        data: fromFs(doc)
+                    });
+                });
+            }
+            return docs;
+        }
     } catch (error) {
-        console.error('Firestore collection error:', error);
+        console.error(`Error loading collection ${path}:`, error);
         return [];
     }
 }
 
 async function firestoreCreateDoc(path, data, idToken = null) {
     try {
-        const docRef = doc(db, path);
-        await setDoc(docRef, data);
-        return true;
+        if (isExtensionContext()) {
+            // Use Chrome extension background script
+            const response = await chrome.runtime.sendMessage({
+                type: 'FIRESTORE_CREATE_DOC',
+                path: path,
+                data: data,
+                idToken: idToken
+            });
+            if (response.success) {
+                return response.data;
+            } else {
+                throw new Error(response.error);
+            }
+        } else {
+            // Fallback: Direct API call (may have CORS issues in some browsers)
+            const url = `${FS_BASE(path)}?key=${encodeURIComponent(firebaseConfig.apiKey)}`;
+            const body = { fields: {} };
+            Object.keys(data).forEach(key => {
+                body.fields[key] = fsValue(data[key]);
+            });
+            const headers = { 'Content-Type': 'application/json' };
+            if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
+
+            const res = await fetch(url, {
+                method: 'PATCH',
+                headers,
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) {
+                throw new Error(`Firestore CREATE failed: ${res.status}`);
+            }
+            return true;
+        }
     } catch (error) {
-        console.error('Create document error:', error);
         return false;
     }
 }
@@ -73,8 +183,6 @@ const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 // Load admin auth from cache on page load
 async function loadAdminAuth() {
     try {
-        console.log('Loading admin auth from cache...');
-
         // Try to get from localStorage first (faster)
         const cachedSession = localStorage.getItem(ADMIN_SESSION_KEY);
         if (cachedSession) {
@@ -87,13 +195,11 @@ async function loadAdminAuth() {
                     idToken: sessionData.idToken,
                     user: sessionData.user
                 };
-                console.log('Restored admin auth from cache:', adminAuth);
                 showAdminContent(true);
                 setAdminLoginMsg('Welcome back!', 'ok');
                 loadUsers('');
                 return true;
             } else {
-                console.log('Cached session expired, clearing cache');
                 localStorage.removeItem(ADMIN_SESSION_KEY);
             }
         }
@@ -102,11 +208,9 @@ async function loadAdminAuth() {
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
             try {
                 const stored = await chrome.storage.local.get(['adminAuth']);
-                console.log('Stored admin auth:', stored.adminAuth);
 
                 if (stored.adminAuth && stored.adminAuth.idToken) {
                     adminAuth = stored.adminAuth;
-                    console.log('Restored admin auth from storage:', adminAuth);
                     showAdminContent(true);
                     setAdminLoginMsg('Welcome back!', 'ok');
                     loadUsers('');
@@ -116,14 +220,12 @@ async function loadAdminAuth() {
                     return true;
                 }
             } catch (error) {
-                console.error('Error loading from Chrome storage:', error);
+                // Silent error handling
             }
         }
 
-        console.log('No stored admin auth found');
         return false;
     } catch (error) {
-        console.error('Error loading admin auth:', error);
         return false;
     }
 }
@@ -137,29 +239,21 @@ function updateAdminCache() {
             timestamp: Date.now()
         };
         localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(cacheData));
-        console.log('Admin cache updated');
     } catch (error) {
-        console.error('Error updating admin cache:', error);
+        // Silent error handling
     }
 }
 
 // Save admin auth to storage and cache
 async function saveAdminAuth() {
     try {
-        console.log('Saving admin auth to storage:', adminAuth);
-
         // Try Chrome storage first, fallback to localStorage
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
             await chrome.storage.local.set({ adminAuth });
-            console.log('Admin auth saved to Chrome storage');
-        } else {
-            console.log('Chrome storage not available, using localStorage only');
         }
 
         updateAdminCache();
-        console.log('Admin auth saved successfully');
     } catch (error) {
-        console.error('Error saving admin auth:', error);
         // Fallback to localStorage only
         updateAdminCache();
     }
@@ -261,23 +355,28 @@ function formatTs(ts) {
 
 async function isAdmin(uid) {
     try {
-        console.log('Checking admin status for UID:', uid);
         const doc = await firestoreGetDoc(`Admins/${uid}`, adminAuth.idToken);
-        console.log('Admin document:', doc);
 
         if (doc) {
-            const data = doc;
-            console.log('Admin data:', data);
-            console.log('isAdmin field value:', data.isAdmin);
-            console.log('isAdmin field type:', typeof data.isAdmin);
-            const isAdmin = !!data.isAdmin;
-            console.log('Is admin result:', isAdmin);
-            return isAdmin;
+            // Check for isAdmin field in various possible locations
+            const isAdminValue = doc.isAdmin || doc.isadmin || doc.IsAdmin;
+
+            // If the document exists, consider it an admin (even if isAdmin field is missing)
+            if (isAdminValue === true || isAdminValue === 'true' || isAdminValue === 1) {
+                return true;
+            }
+
+            // If document exists but isAdmin is explicitly false, return false
+            if (isAdminValue === false || isAdminValue === 'false' || isAdminValue === 0) {
+                return false;
+            }
+
+            // If document exists but isAdmin field is missing or undefined, 
+            // assume it's an admin (document existence = admin status)
+            return true;
         }
-        console.log('No admin document found');
         return false;
     } catch (error) {
-        console.error('Error checking admin status:', error);
         return false;
     }
 }
@@ -292,9 +391,10 @@ async function loadUsers(emailContains) {
     }
 
     try {
-        console.log('Fetching users from Firestore with admin token...');
+        console.log('Loading users with admin token:', adminAuth.idToken ? 'Present' : 'Missing');
+
         const docs = await firestoreGetCollection('Users', adminAuth.idToken);
-        console.log('Users fetched:', docs.length);
+        console.log('Users collection response:', docs);
 
         const items = [];
 
@@ -306,20 +406,18 @@ async function loadUsers(emailContains) {
             if (emailContains && !(u.email || '').toLowerCase().includes(emailContains.toLowerCase())) continue;
 
             // Try to get user stats
-            let latestTier = '—', progress = '—', points = '—', lastAt = '—', entryCount = '0';
+            let latestTier = '—', progress = '—', points = '—', lastAt = '—', entryCount = '0', isEligible = false;
 
             try {
                 // Get all stats for this user
-                console.log('Fetching stats for user:', uid);
-                const statsDocs = await firestoreGetCollection(`StatsHistory`, adminAuth.idToken);
-                console.log('Total stats documents:', statsDocs.length);
+                console.log('Loading stats for user:', uid);
+                const statsDocs = await firestoreGetCollection(`StatsHistoryPrivate`, adminAuth.idToken);
+                console.log('Stats collection response:', statsDocs);
 
                 const userStats = statsDocs.filter(statDoc => {
                     const statData = statDoc.data;
                     return statData.userId === uid;
                 });
-
-                console.log('User stats found:', userStats.length, 'for user:', uid);
 
                 if (userStats.length > 0) {
                     // Sort by timestamp and get latest
@@ -330,12 +428,18 @@ async function loadUsers(emailContains) {
                     });
 
                     const latestStat = userStats[0].data;
-                    console.log('Latest stat for user:', uid, latestStat);
+                    console.log('Latest stat data structure:', latestStat);
 
                     // Extract data from different possible structures
-                    latestTier = latestStat?.stats?.userStats?.bucketName ||
-                        latestStat?.bucketName ||
-                        latestStat?.tier || '—';
+                    latestTier = latestStat?.tier ||
+                        latestStat?.stats?.userStats?.bucketName ||
+                        latestStat?.bucketName || '—';
+
+                    console.log('Extracted tier:', latestTier, 'from paths:', {
+                        'stats.userStats.bucketName': latestStat?.stats?.userStats?.bucketName,
+                        'bucketName': latestStat?.bucketName,
+                        'tier': latestStat?.tier
+                    });
 
                     const progressValue = latestStat?.progressPercentage ??
                         latestStat?.stats?.userStats?.progressPercentage ??
@@ -349,23 +453,15 @@ async function loadUsers(emailContains) {
                     lastAt = formatTs(latestStat?.timestamp);
                     entryCount = userStats.length.toString();
 
-                    console.log('User table data for', uid, ':', {
-                        latestTier,
-                        progress,
-                        points,
-                        lastAt,
-                        entryCount,
-                        rawTimestamp: latestStat?.timestamp,
-                        timestampType: typeof latestStat?.timestamp
-                    });
-                } else {
-                    console.log('No stats found for user:', uid);
+                    // Extract eligibility status for main view
+                    const eligibility = latestStat?.stats?.eligibility || {};
+                    const isEligible = eligibility?.eligible || false;
                 }
             } catch (statsError) {
-                console.error('Could not load stats for user:', uid, statsError);
+                console.error('Error loading stats for user:', uid, statsError);
             }
 
-            items.push({ uid: u.uid, email: u.email || '—', lastAt, latestTier, progress, points, entryCount });
+            items.push({ uid: u.uid, email: u.email || '—', lastAt, latestTier, progress, points, entryCount, isEligible });
         }
 
         // Sort users by email
@@ -375,7 +471,10 @@ async function loadUsers(emailContains) {
             const tr = document.createElement('tr');
             const tierBadge = it.latestTier ? `<span class="tier-badge ${getTierClass(it.latestTier)}">${it.latestTier}</span>` : '—';
             const progressDisplay = it.progress ? `${it.progress}%` : '—';
-            tr.innerHTML = `<td>${it.email}</td><td>${it.lastAt}</td><td>${tierBadge}</td><td>${progressDisplay}</td><td>${it.points || '—'}</td><td>${it.entryCount}</td><td><button class="btn view-stats-btn" data-uid="${it.uid}" data-email="${it.email}">View Stats</button></td>`;
+            const eligibilityDisplay = it.isEligible ?
+                '<span style="color: #10b981;">✅ Eligible</span>' :
+                '<span style="color: #ef4444;">❌ Not Eligible</span>';
+            tr.innerHTML = `<td>${it.email}</td><td>${it.lastAt}</td><td>${tierBadge}</td><td>${progressDisplay}</td><td>${it.points || '—'}</td><td>${eligibilityDisplay}</td><td>${it.entryCount}</td><td><button class="btn view-stats-btn" data-uid="${it.uid}" data-email="${it.email}">View Stats</button></td>`;
             usersTable.appendChild(tr);
         }
 
@@ -402,13 +501,11 @@ async function loadUserStats(uid, email) {
         const userData = userDoc || {};
 
         // Get all stats for this user
-        const statsDocs = await firestoreGetCollection(`StatsHistory`, adminAuth.idToken);
+        const statsDocs = await firestoreGetCollection(`StatsHistoryPrivate`, adminAuth.idToken);
         const userStats = statsDocs.filter(statDoc => {
             const statData = statDoc.data;
             return statData.userId === uid;
         });
-
-        console.log('Loading stats for user:', uid, 'Found:', userStats.length, 'entries');
 
         if (userStats.length === 0) {
             modalContent.innerHTML = `
@@ -437,7 +534,8 @@ async function loadUserStats(uid, email) {
 
         // Get latest tier and progress for display from the first (newest) stat
         const latestStat = userStats.length > 0 ? userStats[0].data : null;
-        const latestTier = latestStat?.stats?.userStats?.bucketName ||
+        const latestTier = latestStat?.tier ||
+            latestStat?.stats?.userStats?.bucketName ||
             latestStat?.userStats?.bucketName ||
             latestStat?.bucketName ||
             '—';
@@ -462,12 +560,6 @@ async function loadUserStats(uid, email) {
                 <div><strong>Latest Tier:</strong> ${latestTier !== '—' ? `<span class="tier-badge ${getTierClass(latestTier)}">${latestTier}</span>` : '—'}</div>
                 <div><strong>Latest Progress:</strong> ${latestProgress || '—'}%</div>
             </div>
-            <div style="margin-top: 8px;">
-                <button onclick="console.log('Raw user stats data:', ${JSON.stringify(userStats.map(doc => fromFs(doc))).replace(/"/g, '&quot;')})" 
-                        style="background: var(--accent); color: white; border: none; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; cursor: pointer;">
-                    🔍 Debug Raw Data
-                </button>
-            </div>
         `;
 
         modalContent.innerHTML = '';
@@ -481,12 +573,18 @@ async function loadUserStats(uid, email) {
             div.style.marginBottom = '8px';
             div.style.padding = '12px';
 
-            // Extract stats data with better debugging
-            console.log('Processing stat entry:', stat);
+            // Extract stats data
 
-            const tier = stat?.stats?.userStats?.bucketName ||
-                stat?.bucketName ||
-                stat?.tier || '—';
+            const tier = stat?.tier ||
+                stat?.stats?.userStats?.bucketName ||
+                stat?.bucketName || '—';
+
+            console.log('Individual stat tier extraction:', {
+                'stat.stats.userStats.bucketName': stat?.stats?.userStats?.bucketName,
+                'stat.bucketName': stat?.bucketName,
+                'stat.tier': stat?.tier,
+                'finalTier': tier
+            });
 
             const progress = stat?.progressPercentage ??
                 stat?.stats?.userStats?.progressPercentage ??
@@ -512,6 +610,28 @@ async function loadUserStats(uid, email) {
             // Extract eligibility data
             const eligibility = stat?.stats?.eligibility || {};
             const isEligible = eligibility?.eligible || false;
+
+            // Extract detailed eligibility criteria
+            const eligibilityFields = (eligibility && (eligibility.rules || eligibility)) || {};
+            const eligibilityItems = [
+                { key: 'is_kyc_exempt', label: 'KYC Exempt' },
+                { key: 'is_not_sybil', label: 'Not Sybil' },
+                { key: 'is_not_sanctioned', label: 'Not Sanctioned' },
+                { key: 'have_played_any_in_game_quest', label: 'Played Any In-Game Quest' },
+                { key: 'have_linked_any_social_media', label: 'Linked Any Social' },
+                { key: 'have_verified_phone', label: 'Verified Phone' }
+            ];
+
+            // Build eligibility criteria HTML
+            const eligibilityCriteria = eligibilityItems
+                .filter(({ key }) => Object.prototype.hasOwnProperty.call(eligibilityFields, key))
+                .map(({ key, label }) => {
+                    const isOk = !!eligibilityFields[key];
+                    return `<div style="font-size: 0.7rem; margin: 2px 0; color: ${isOk ? '#10b981' : '#ef4444'};">
+                        ${isOk ? '✅' : '❌'} ${label}
+                    </div>`;
+                })
+                .join('');
 
             // Create progress bar with tier-based styling
             const progressBar = progress !== '—' ? `
@@ -549,14 +669,21 @@ async function loadUserStats(uid, email) {
                         <div><strong>Browser:</strong> ${userAgent.split(' ')[0] || 'Unknown'}</div>
                     </div>
                 </div>
+                ${eligibilityCriteria ? `
+                    <div style="margin-top: 8px; font-size: 0.8rem;">
+                        <div style="color: var(--muted); margin-bottom: 4px;"><strong>Eligibility Criteria:</strong></div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
+                            ${eligibilityCriteria}
+                        </div>
+                    </div>
+                ` : ''}
                 ${targetQuests.length > 0 ? `
                     <div style="margin-top: 8px; font-size: 0.8rem;">
-                        <div style="color: var(--muted); margin-bottom: 4px;"><strong>Completed Quests:</strong></div>
-                        <div style="display: flex; flex-wrap: wrap; gap: 4px; max-height: 60px; overflow-y: auto;">
-                            ${targetQuests.slice(0, 3).map(quest =>
+                        <div style="color: var(--muted); margin-bottom: 4px;"><strong>Completed Quests (${totalQuests}):</strong></div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 4px; max-height: 120px; overflow-y: auto;">
+                            ${targetQuests.map(quest =>
                 `<span style="background: rgba(122, 162, 255, 0.2); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem; white-space: nowrap;">${quest}</span>`
             ).join('')}
-                            ${targetQuests.length > 3 ? `<span style="color: var(--muted); font-size: 0.7rem;">+${targetQuests.length - 3} more</span>` : ''}
                         </div>
                     </div>
                 ` : ''}
@@ -575,13 +702,20 @@ async function loadUserStats(uid, email) {
             const firstStat = userStats[userStats.length - 1].data;
             const latestStat = userStats[0].data;
 
-            const firstTier = firstStat?.stats?.userStats?.bucketName ||
-                firstStat?.bucketName ||
-                firstStat?.tier || '—';
+            const firstTier = firstStat?.tier ||
+                firstStat?.stats?.userStats?.bucketName ||
+                firstStat?.bucketName || '—';
 
-            const latestTier = latestStat?.stats?.userStats?.bucketName ||
-                latestStat?.bucketName ||
-                latestStat?.tier || '—';
+            const latestTier = latestStat?.tier ||
+                latestStat?.stats?.userStats?.bucketName ||
+                latestStat?.bucketName || '—';
+
+            // Get all unique quests across all entries
+            const allQuests = new Set();
+            userStats.forEach(statDoc => {
+                const quests = statDoc.data?.stats?.userStats?.targetQuestsCompleted || [];
+                quests.forEach(quest => allQuests.add(quest));
+            });
 
             summaryDiv.innerHTML = `
                 <div style="font-weight: bold; margin-bottom: 8px;">📊 Summary</div>
@@ -590,16 +724,28 @@ async function loadUserStats(uid, email) {
                 <div><strong>Total requests:</strong> ${userStats.length}</div>
                 <div><strong>First request:</strong> ${formatTs(firstStat?.timestamp)}</div>
                 <div><strong>Latest request:</strong> ${formatTs(latestStat?.timestamp)}</div>
+                <div style="margin-top: 8px;">
+                    <div style="font-weight: bold; margin-bottom: 4px;">📋 Quest Summary</div>
+                    <div><strong>Total unique quests completed:</strong> ${allQuests.size}</div>
+                    <div style="margin-top: 8px;">
+                        <div style="font-size: 0.9rem; margin-bottom: 4px;"><strong>All Unique Quests:</strong></div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 4px; max-height: 150px; overflow-y: auto;">
+                            ${Array.from(allQuests).map(quest =>
+                `<span style="background: rgba(122, 162, 255, 0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.7rem;">${quest}</span>`
+            ).join('')}
+                        </div>
+                    </div>
+                </div>
             `;
 
             modalContent.appendChild(summaryDiv);
         }
 
     } catch (error) {
-        console.error('Error loading user stats:', error);
         modalContent.innerHTML = '<div class="muted">Error loading stats: ' + error.message + '</div>';
     }
 }
+
 
 // Access Code Generation Functions
 function generateAccessCode(length = 8, prefix = '') {
@@ -611,21 +757,36 @@ function generateAccessCode(length = 8, prefix = '') {
     return result;
 }
 
-// Firebase Authentication using REST API
+// Firebase Authentication with fallback for both extension and web contexts
 async function adminSignIn(email, password) {
     try {
-        const res = await fetch(`${IDT_BASE}/accounts:signInWithPassword?key=${encodeURIComponent(firebaseConfig.apiKey)}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password, returnSecureToken: true })
-        });
+        if (isExtensionContext()) {
+            // Use Chrome extension background script
+            const response = await chrome.runtime.sendMessage({
+                type: 'FIREBASE_SIGN_IN',
+                email: email,
+                password: password
+            });
+            if (response.success) {
+                return response.data;
+            } else {
+                throw new Error(response.error);
+            }
+        } else {
+            // Fallback: Direct API call (may have CORS issues in some browsers)
+            const res = await fetch(`${IDT_BASE}/accounts:signInWithPassword?key=${encodeURIComponent(firebaseConfig.apiKey)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password, returnSecureToken: true })
+            });
 
-        if (!res.ok) {
-            const error = await res.json();
-            throw new Error(error.error?.message || 'Sign in failed');
+            if (!res.ok) {
+                const error = await res.json();
+                throw new Error(error.error?.message || 'Sign in failed');
+            }
+
+            return await res.json();
         }
-
-        return await res.json();
     } catch (error) {
         throw error;
     }
@@ -740,6 +901,7 @@ document.getElementById('adminLoginBtn')?.addEventListener('click', () => {
     setAdminLoginMsg('');
 });
 
+
 document.getElementById('adminLoginSubmitBtn')?.addEventListener('click', async () => {
     const email = document.getElementById('adminEmail').value.trim();
     const password = document.getElementById('adminPassword').value;
@@ -760,25 +922,13 @@ document.getElementById('adminLoginSubmitBtn')?.addEventListener('click', async 
             tokenTimestamp: Date.now()
         };
 
-        console.log('Admin signed in:', adminAuth.user);
-        console.log('Checking admin status...');
-
         // Check if user is actually an admin
         const isAdminUser = await isAdmin(adminAuth.user.uid);
-        console.log('Is admin user:', isAdminUser);
 
-        // Temporary bypass for testing - remove this in production
-        const isTestAdmin = adminAuth.user.email === 'admin@immutable.com' ||
-            adminAuth.user.email.includes('admin');
-
-        if (!isAdminUser && !isTestAdmin) {
+        if (!isAdminUser) {
             setAdminLoginMsg('User is not an admin. Please contact administrator.', 'error');
             adminAuth = { isAuthenticated: false, idToken: null, user: null };
             return;
-        }
-
-        if (isTestAdmin && !isAdminUser) {
-            console.log('Using test admin bypass for:', adminAuth.user.email);
         }
 
         // Save to storage for persistence
@@ -812,7 +962,7 @@ document.getElementById('adminLogoutBtn')?.addEventListener('click', async () =>
             await chrome.storage.local.remove(['adminAuth']);
         }
     } catch (error) {
-        console.error('Error clearing Chrome storage:', error);
+        // Silent error handling
     }
 
     localStorage.removeItem(ADMIN_SESSION_KEY);
@@ -879,6 +1029,15 @@ document.getElementById('adminLoginModal')?.addEventListener('click', (e) => {
 
 // Initialize admin dashboard
 async function initializeAdmin() {
+    // Show context information
+    const contextInfo = isExtensionContext() ?
+        'Running in Chrome Extension context' :
+        'Running in Web Browser context (may have CORS limitations)';
+
+    if (adminInfo) {
+        adminInfo.textContent = contextInfo;
+    }
+
     await loadAdminAuth();
     // Only show login prompt if not already authenticated
     if (!adminAuth.isAuthenticated) {

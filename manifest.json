@@ -60,6 +60,6 @@
         }
     ],
     "content_security_policy": {
-        "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://identitytoolkit.googleapis.com https://firestore.googleapis.com https://api.immutable.com https://play.immutable.com;"
+        "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://identitytoolkit.googleapis.com https://firestore.googleapis.com https://api.immutable.com https://play.immutable.com https://api.ipify.org;"
     }
 }

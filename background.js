@@ -21,7 +21,6 @@ const IDT_BASE = "https://identitytoolkit.googleapis.com/v1";
 // Firebase authentication functions - using REST API
 async function firebaseSignIn(email, password) {
     try {
-        console.log('[Background] Firebase sign in request:', email);
         const url = `${IDT_BASE}/accounts:signInWithPassword?key=${encodeURIComponent(FIREBASE_CONFIG.apiKey)}`;
         const requestBody = { email, password, returnSecureToken: true };
 
@@ -31,26 +30,20 @@ async function firebaseSignIn(email, password) {
             body: JSON.stringify(requestBody)
         });
 
-        console.log('[Background] Firebase response status:', response.status);
-
         if (!response.ok) {
             const errorText = await response.text();
-            console.error('[Background] Firebase error:', errorText);
             throw new Error(`Firebase sign in failed: ${response.status}`);
         }
 
         const data = await response.json();
-        console.log('[Background] Firebase sign in successful');
         return data;
     } catch (error) {
-        console.error('[Background] Firebase sign in error:', error);
         throw error;
     }
 }
 
 async function firebaseSignUp(email, password) {
     try {
-        console.log('[Background] Firebase sign up request:', email);
         const url = `${IDT_BASE}/accounts:signUp?key=${encodeURIComponent(FIREBASE_CONFIG.apiKey)}`;
         const requestBody = { email, password, returnSecureToken: true };
 
@@ -60,19 +53,14 @@ async function firebaseSignUp(email, password) {
             body: JSON.stringify(requestBody)
         });
 
-        console.log('[Background] Firebase signup response status:', response.status);
-
         if (!response.ok) {
             const errorText = await response.text();
-            console.error('[Background] Firebase signup error:', errorText);
             throw new Error(`Firebase sign up failed: ${response.status}`);
         }
 
         const data = await response.json();
-        console.log('[Background] Firebase sign up successful');
         return data;
     } catch (error) {
-        console.error('[Background] Firebase sign up error:', error);
         throw error;
     }
 }
@@ -93,6 +81,90 @@ function broadcastTokenToSiteTabs(token) {
             });
         });
     } catch (_) { }
+}
+
+// Firestore REST API functions
+async function firestoreGetDoc(path, idToken = null) {
+    try {
+        const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(FIREBASE_CONFIG.projectId)}/databases/(default)/documents/${path}?key=${encodeURIComponent(FIREBASE_CONFIG.apiKey)}`;
+        const headers = idToken ? { 'Authorization': `Bearer ${idToken}` } : {};
+        const res = await fetch(url, { headers });
+        if (!res.ok) {
+            if (res.status === 404) return null;
+            throw new Error(`Firestore GET failed: ${res.status}`);
+        }
+        const doc = await res.json();
+        return fromFs(doc);
+    } catch (error) {
+        throw error;
+    }
+}
+
+async function firestoreGetCollection(path, idToken = null) {
+    try {
+        const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(FIREBASE_CONFIG.projectId)}/databases/(default)/documents/${path}?key=${encodeURIComponent(FIREBASE_CONFIG.apiKey)}`;
+        const headers = idToken ? { 'Authorization': `Bearer ${idToken}` } : {};
+        const res = await fetch(url, { headers });
+        if (!res.ok) {
+            throw new Error(`Firestore collection GET failed: ${res.status}`);
+        }
+        const data = await res.json();
+        const docs = [];
+        if (data.documents) {
+            data.documents.forEach(doc => {
+                const pathParts = doc.name.split('/');
+                const docId = pathParts[pathParts.length - 1];
+                docs.push({
+                    id: docId,
+                    data: fromFs(doc)
+                });
+            });
+        }
+        return docs;
+    } catch (error) {
+        throw error;
+    }
+}
+
+async function firestoreCreateDoc(path, data, idToken = null) {
+    try {
+        const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(FIREBASE_CONFIG.projectId)}/databases/(default)/documents/${path}?key=${encodeURIComponent(FIREBASE_CONFIG.apiKey)}`;
+        const body = { fields: {} };
+        Object.keys(data).forEach(key => {
+            body.fields[key] = fsValue(data[key]);
+        });
+        const headers = { 'Content-Type': 'application/json' };
+        if (idToken) headers['Authorization'] = `Bearer ${idToken}`;
+
+        const res = await fetch(url, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+            throw new Error(`Firestore CREATE failed: ${res.status}`);
+        }
+        return true;
+    } catch (error) {
+        throw error;
+    }
+}
+
+// Firestore data conversion helpers
+function fromFs(doc) {
+    const f = (doc && doc.fields) || {};
+    const pick = (v) => {
+        if (!v) return undefined;
+        if (v.stringValue !== undefined) return v.stringValue;
+        if (v.integerValue !== undefined) return parseInt(v.integerValue, 10);
+        if (v.doubleValue !== undefined) return v.doubleValue;
+        if (v.booleanValue !== undefined) return v.booleanValue;
+        if (v.timestampValue !== undefined) return v.timestampValue;
+        if (v.mapValue !== undefined) { const o = {}; const mf = v.mapValue.fields || {}; Object.keys(mf).forEach(k => o[k] = pick(mf[k])); return o; }
+        if (v.arrayValue !== undefined) return (v.arrayValue.values || []).map(pick);
+        return undefined;
+    };
+    const out = {}; Object.keys(f).forEach(k => out[k] = pick(f[k])); return out;
 }
 
 // Handle Firebase authentication requests from auth.html
@@ -118,6 +190,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
         return true; // Keep message channel open for async response
     }
+
+    // Handle Firestore operations from admin.js
+    if (request.type === 'FIRESTORE_GET_DOC') {
+        firestoreGetDoc(request.path, request.idToken)
+            .then(result => {
+                sendResponse({ success: true, data: result });
+            })
+            .catch(error => {
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    }
+
+    if (request.type === 'FIRESTORE_GET_COLLECTION') {
+        firestoreGetCollection(request.path, request.idToken)
+            .then(result => {
+                sendResponse({ success: true, data: result });
+            })
+            .catch(error => {
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    }
+
+    if (request.type === 'FIRESTORE_CREATE_DOC') {
+        firestoreCreateDoc(request.path, request.data, request.idToken)
+            .then(result => {
+                sendResponse({ success: true, data: result });
+            })
+            .catch(error => {
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    }
 });
 
 // Ensure page hook is injected in MAIN world on play.immutable.com using scripting API
@@ -133,13 +239,11 @@ function registerPageHookContentScript() {
             }
         ], () => {
             if (chrome.runtime.lastError) {
-                try { console.warn("[ImmutableExt] registerContentScripts error", chrome.runtime.lastError.message); } catch (_) { }
-            } else {
-                try { console.info("[ImmutableExt] page hook registered (MAIN world)"); } catch (_) { }
+                // Silent error handling
             }
         });
     } catch (e) {
-        try { console.warn("[ImmutableExt] registerContentScripts threw", String(e && e.message ? e.message : e)); } catch (_) { }
+        // Silent error handling
     }
 }
 
@@ -207,18 +311,35 @@ async function sha256Hex(input) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Helper: fetch public IP
+// Helper: fetch public IP - returns clean IPv4 address only
 async function fetchPublicIp() {
     try {
         const res = await fetch('https://api.ipify.org?format=json');
-        if (!res.ok) return 'Unknown IP';
+        if (!res.ok) return null;
         const data = await res.json();
-        return data && data.ip ? data.ip : 'Unknown IP';
-    } catch { return 'Unknown IP'; }
+        const ip = data && data.ip ? data.ip.trim() : null;
+
+        // Validate IPv4 format
+        if (ip && /^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+            return ip;
+        }
+        return null;
+    } catch {
+        return null;
+    }
 }
 
-// Helper: map to Firestore REST value (no longer needed with v9+ SDK)
-// This function is kept for backward compatibility
+// Helper: map to Firestore REST value
+function fsValue(val) {
+    if (val === null || typeof val === 'undefined') return { nullValue: null };
+    if (typeof val === 'string') return { stringValue: val };
+    if (typeof val === 'number') return Number.isInteger(val) ? { integerValue: String(val) } : { doubleValue: val };
+    if (typeof val === 'boolean') return { booleanValue: val };
+    if (Array.isArray(val)) return { arrayValue: { values: val.map(fsValue) } };
+    if (val instanceof Date) return { timestampValue: val.toISOString() };
+    if (typeof val === 'object') { const fields = {}; Object.keys(val).forEach(k => fields[k] = fsValue(val[k])); return { mapValue: { fields } }; }
+    return { stringValue: String(val) };
+}
 
 // Build combined object similar to index.html
 function buildCombined(statsData, eligibilityData) {
@@ -257,11 +378,11 @@ async function firebaseLogIfEnabled(token, combinedOrRaw) {
         const defaultCfg = {
             apiKey: "AIzaSyA0fUKA2kpoW9hHEWKcRqxjX-m-ZBFRpVM",
             projectId: "immutable-api",
-            collection: "StatsHistory"
+            collection: "StatsHistoryPrivate"
         };
         const firebaseCfg = cfg && cfg.firebaseConfig ? { ...defaultCfg, ...cfg.firebaseConfig } : defaultCfg;
         const { apiKey, projectId, collection } = firebaseCfg;
-        const coll = collection || 'StatsHistory';
+        const coll = collection || 'StatsHistoryPrivate';
         if (!apiKey || !projectId) {
             await new Promise((r) => chrome.storage.local.set({ lastFirebaseStatus: { ok: false, message: 'Missing Firebase config' } }, r));
             return { ok: false, message: 'Missing Firebase config' };
@@ -295,6 +416,7 @@ async function firebaseLogIfEnabled(token, combinedOrRaw) {
                 timestamp: { timestampValue: nowIso },
                 weeklyPoints: fsValue(combined && (combined.weeklyPoints || combined.points || 0)),
                 progressPercentage: fsValue(progress),
+                tier: fsValue(tier), // Add tier as separate field for easier access
                 userId: fsValue(user && user.uid ? user.uid : null),
                 userEmail: fsValue(user && user.email ? user.email : null)
             }
@@ -303,20 +425,11 @@ async function firebaseLogIfEnabled(token, combinedOrRaw) {
         const base = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/${encodeURIComponent(coll)}`;
         const url = `${base}?documentId=${encodeURIComponent(logId)}&key=${encodeURIComponent(apiKey)}`;
 
-        console.log('[ImmutableExt] Logging to Firestore:', {
-            collection: coll,
-            userId: user?.uid,
-            userEmail: user?.email,
-            progress: progress,
-            tier: tier,
-            logId: logId
-        });
 
         const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(doc) });
         const ok = res.ok || res.status === 409; // 409 if already exists
         const message = ok ? 'logged' : `http ${res.status}`;
 
-        console.log('[ImmutableExt] Firestore response:', { ok, message, status: res.status });
 
         await new Promise((r) => chrome.storage.local.set({ lastFirebaseStatus: { ok, message } }, r));
         return { ok, message };
@@ -442,7 +555,6 @@ function recordDiagnostics(details, authHeaderValue) {
             headerNames
         };
         chrome.storage.local.set({ immutableAuthLastSeen: info });
-        console.debug("[ImmutableExt] lastSeen", info);
     } catch (_e) { }
 }
 
@@ -498,7 +610,6 @@ function handleRequestError(details) {
         const errorInfo = { error: details.error || "unknown_error", url: details.url, time: Date.now() };
         chrome.storage.local.set({ immutableAuthLastError: errorInfo });
         setBadge("ERR", "#EF4444");
-        console.warn("[ImmutableExt] request error", errorInfo);
     } catch (_e) { }
 }
 
@@ -513,7 +624,6 @@ chrome.runtime.onInstalled.addListener(() => {
         if (Object.keys(updates).length) chrome.storage.local.set(updates);
     });
     ensurePageHookRegistered();
-    console.info("[ImmutableExt] Installed/updated. Ready to capture tokens.");
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -523,7 +633,6 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
         if (!message || message.type !== 'TOKEN_CAPTURED' || !message.token) return;
-        console.info('[ImmutableExt] token from content', { len: message.token.length, from: sender && sender.url });
         saveTokenToStorage(message.token, sender && sender.url ? sender.url : null);
         setBadge("OK", "#0E9F6E");
         sendResponse && sendResponse({ ok: true });
